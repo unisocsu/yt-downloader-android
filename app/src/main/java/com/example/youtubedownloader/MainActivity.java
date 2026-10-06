@@ -1,21 +1,43 @@
 package com.example.youtubedownloader;
 
 import android.app.Activity;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
-import android.text.TextUtils;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.text.TextUtils;
 
 public class MainActivity extends Activity {
     private EditText urlInput;
     private Button downloadButton;
     private ProgressBar progressBar;
     private TextView statusText;
+
+    private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (!DownloadService.ACTION_STATUS.equals(intent.getAction())) return;
+
+            String message = intent.getStringExtra("message");
+            int progress = intent.getIntExtra("progress", 0);
+
+            statusText.setText(message);
+            if (progress >= 0) {
+                progressBar.setProgress(progress);
+                progressBar.setVisibility(View.VISIBLE);
+            }
+            if (progress == 100 || progress < 0) {
+                progressBar.setVisibility(View.GONE);
+                downloadButton.setEnabled(true);
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,6 +58,18 @@ public class MainActivity extends Activity {
         });
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        registerReceiver(statusReceiver, new IntentFilter(DownloadService.ACTION_STATUS));
+    }
+
+    @Override
+    protected void onPause() {
+        try { unregisterReceiver(statusReceiver); } catch (Exception ignored) {}
+        super.onPause();
+    }
+
     private void startDownload() {
         String url = urlInput.getText().toString().trim();
 
@@ -48,6 +82,7 @@ public class MainActivity extends Activity {
             return;
         }
 
+        progressBar.setProgress(0);
         progressBar.setVisibility(View.VISIBLE);
         statusText.setText(R.string.download_starting);
         downloadButton.setEnabled(false);
