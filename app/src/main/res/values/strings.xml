@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Video Downloader</string>
+    <string name="title">Video Downloader</string>
+    <string name="url_hint">הכנס כתובת URL</string>
+    <string name="download">הורדה</string>
+    <string name="ready">מוכן</string>
+    <string name="enter_url">נא להזין כתובת URL</string>
+    <string name="invalid_url">כתובת URL לא תקינה</string>
+    <string name="download_starting">מתחיל...</string>
+</resources>
