@@ -5,117 +5,87 @@ import android.content.Intent;
 import android.os.Environment;
 import android.os.IBinder;
 
-import java.io.BufferedInputStream;
+import com.yausername.youtubedl_android.DownloadProgressCallback;
+import com.yausername.youtubedl_android.YoutubeDL;
+import com.yausername.youtubedl_android.YoutubeDLException;
+import com.yausername.youtubedl_android.YoutubeDLRequest;
+
 import java.io.File;
-import java.io.FileOutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLDecoder;
 
 public class DownloadService extends Service {
     public static final String EXTRA_URL = "url";
     public static final String ACTION_STATUS = "com.example.youtubedownloader.STATUS";
 
     @Override
-    public int onStartCommand(final Intent intent, int flags, int startId) {
+    public int onStartCommand(final Intent intent, int flags, final int startId) {
         final String url = intent != null ? intent.getStringExtra(EXTRA_URL) : null;
 
         new Thread(new Runnable() {
             @Override public void run() {
-                download(url);
+                downloadWithYtDlp(url);
                 stopSelf(startId);
             }
-        }).start();
+        }, "yt-dlp-download").start();
 
         return START_NOT_STICKY;
     }
 
-    private void download(String sourceUrl) {
-        HttpURLConnection connection = null;
-        BufferedInputStream input = null;
-        FileOutputStream output = null;
-
+    private void downloadWithYtDlp(String url) {
         try {
-            if (sourceUrl == null || sourceUrl.length() == 0) {
+            if (url == null || url.length() == 0) {
                 sendStatus("שגיאה: כתובת ריקה", -1);
                 return;
             }
 
-            sendStatus("מתחבר...", 0);
+            sendStatus("מאתחל מנוע yt-dlp...", 0);
+            YoutubeDL.getInstance().init(getApplication());
 
-            URL url = new URL(sourceUrl);
-            connection = (HttpURLConnection) url.openConnection();
-            connection.setInstanceFollowRedirects(true);
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(30000);
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-            connection.connect();
-
-            int code = connection.getResponseCode();
-            if (code < 200 || code >= 300) {
-                sendStatus("שגיאת HTTP: " + code, -1);
-                return;
-            }
-
-            String name = getFileName(connection, url);
             File downloads = Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS);
-            if (!downloads.exists() && !downloads.mkdirs()) {
-                sendStatus("לא ניתן ליצור תיקיית הורדות", -1);
+            File outputDir = new File(downloads, "yt-downloader");
+            if (!outputDir.exists() && !outputDir.mkdirs()) {
+                sendStatus("שגיאה: לא ניתן ליצור תיקיית הורדות", -1);
                 return;
             }
 
-            File target = new File(downloads, name);
-            input = new BufferedInputStream(connection.getInputStream());
-            output = new FileOutputStream(target);
+            YoutubeDLRequest request = new YoutubeDLRequest(url);
 
-            long total = connection.getContentLength();
-            long done = 0;
-            byte[] buffer = new byte[16 * 1024];
-            int count;
+            // Prefer a single MP4 stream when available. This avoids requiring
+            // a separate FFmpeg package for the basic API19 build.
+            request.addOption("-f", "best[ext=mp4]/best");
+            request.addOption("--no-playlist");
+            request.addOption("--no-mtime");
+            request.addOption("-o",
+                    new File(outputDir, "%(title)s.%(ext)s").getAbsolutePath());
 
-            while ((count = input.read(buffer)) != -1) {
-                output.write(buffer, 0, count);
-                done += count;
+            sendStatus("מאתר וידאו...", 1);
 
-                int progress = total > 0 ? (int) Math.min(100, (done * 100L) / total) : 0;
-                sendStatus("מוריד... " + progress + "%", progress);
-            }
-
-            output.flush();
-            sendStatus("ההורדה הושלמה: " + target.getAbsolutePath(), 100);
-
-        } catch (Exception e) {
-            sendStatus("שגיאה: " + e.getMessage(), -1);
-        } finally {
-            try { if (input != null) input.close(); } catch (Exception ignored) {}
-            try { if (output != null) output.close(); } catch (Exception ignored) {}
-            if (connection != null) connection.disconnect();
-        }
-    }
-
-    private String getFileName(HttpURLConnection connection, URL url) {
-        String disposition = connection.getHeaderField("Content-Disposition");
-        if (disposition != null) {
-            int p = disposition.indexOf("filename=");
-            if (p >= 0) {
-                String value = disposition.substring(p + 9).trim();
-                if (value.startsWith(""") && value.endsWith(""")) {
-                    value = value.substring(1, value.length() - 1);
+            YoutubeDL.getInstance().execute(request, new DownloadProgressCallback() {
+                @Override
+                public void onProgressUpdate(float progress, long etaInSeconds) {
+                    int p = (int) Math.max(0, Math.min(100, progress));
+                    String message = "מוריד... " + p + "%";
+                    if (etaInSeconds >= 0) {
+                        message += " (נותרו " + etaInSeconds + " שניות)";
+                    }
+                    sendStatus(message, p);
                 }
-                try { value = URLDecoder.decode(value, "UTF-8"); } catch (Exception ignored) {}
-                if (value.length() > 0) return safeName(value);
-            }
+            });
+
+            sendStatus("ההורדה הושלמה: " + outputDir.getAbsolutePath(), 100);
+
+        } catch (YoutubeDLException e) {
+            String message = e.getMessage();
+            if (message == null || message.length() == 0) message = e.toString();
+            sendStatus("yt-dlp: " + message, -1);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendStatus("ההורדה הופסקה", -1);
+        } catch (Exception e) {
+            String message = e.getMessage();
+            if (message == null || message.length() == 0) message = e.toString();
+            sendStatus("שגיאה: " + message, -1);
         }
-
-        String path = url.getPath();
-        String value = path != null ? path.substring(path.lastIndexOf('/') + 1) : "";
-        if (value.length() == 0) value = "download_" + System.currentTimeMillis() + ".bin";
-        return safeName(value);
-    }
-
-    private String safeName(String name) {
-        return name.replaceAll("[\\/:*?"<>|]", "_");
     }
 
     private void sendStatus(String message, int progress) {
