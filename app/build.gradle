@@ -16,4 +16,6 @@ android {
 }
 
 dependencies {
+    // Embedded yt-dlp engine. The 0.6.x line is old enough to retain API 19 support.
+    implementation 'com.github.yausername.youtubedl-android:library:0.6.+'
 }
